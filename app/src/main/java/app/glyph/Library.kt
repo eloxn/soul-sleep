@@ -163,7 +163,7 @@ object Library {
             af.tagOrCreateAndSetDefault.apply { setField(FieldKey.LYRICS, lyricsText) }
             af.commit()
 
-            c.contentResolver.openOutputStream(uri, "wt")?.use { output ->
+            c.contentResolver.openOutputStream(uri, "w")?.use { output ->
                 tempFile.inputStream().use { input -> input.copyTo(output) }
             } ?: error("Failed to write metadata stream")
         } finally {
@@ -178,9 +178,10 @@ object Library {
     }
 
     fun getPathFromUri(uri: Uri): String? = runCatching {
-        val docId = DocumentsContract.getTreeDocumentId(uri) ?: return null
+        val rawDocId = DocumentsContract.getTreeDocumentId(uri) ?: return null
+        val docId = java.net.URLDecoder.decode(rawDocId, "UTF-8")
         if (docId.startsWith("primary:")) {
-            val rel = docId.removePrefix("primary:")
+            val rel = docId.removePrefix("primary:").trim('/', '\\')
             val base = Environment.getExternalStorageDirectory().absolutePath
             if (rel.isEmpty()) base else "$base/$rel"
         } else {
@@ -195,14 +196,16 @@ object Library {
         if (direct != null) return direct
 
         val folderPath = getPathFromUri(treeUri)
-        if (folderPath != null && file.absolutePath.startsWith(folderPath)) {
-            val rel = file.absolutePath.removePrefix(folderPath).trim('/', '\\')
+        if (folderPath != null && file.absolutePath.startsWith(folderPath, ignoreCase = true)) {
+            val rel = file.absolutePath.substring(folderPath.length).trim('/', '\\')
             val parts = rel.split('/', '\\').filter { it.isNotEmpty() }
             var current: DocumentFile = tree
             for (part in parts) {
-                current = current.findFile(part) ?: break
+                current = current.findFile(part)
+                    ?: current.listFiles().firstOrNull { it.name.equals(part, ignoreCase = true) }
+                    ?: break
             }
-            if (current.isFile && current.name == file.name) return current
+            if (current.isFile && current.name.equals(file.name, ignoreCase = true)) return current
         }
 
         return searchRecursive(tree, file.name)
@@ -210,7 +213,7 @@ object Library {
 
     private fun searchRecursive(dir: DocumentFile, targetName: String): DocumentFile? {
         for (f in dir.listFiles()) {
-            if (f.isFile && f.name == targetName) return f
+            if (f.isFile && f.name.equals(targetName, ignoreCase = true)) return f
             if (f.isDirectory) {
                 val found = searchRecursive(f, targetName)
                 if (found != null) return found

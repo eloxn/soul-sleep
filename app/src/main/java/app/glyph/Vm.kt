@@ -137,6 +137,9 @@ class Vm(app: Application) : AndroidViewModel(app) {
                         Sources.find(t)?.also { Library.write(getApplication(), t, it, folderUri.value) }
                     }
                 }
+                r.onFailure {
+                    android.util.Log.e("SoulSleep", "Failed to fetch/write for ${t.title} (${t.artist}): ${it.message}", it)
+                }
                 put(t.id, r.fold({ f -> if (f == null) St.Miss else St.Done(f.grain, f.source) }, { St.Fail }))
                 served.update { it + 1 }
                 if (served.value % 50 == 0) {           // 1 minute rest after every 50 requests
