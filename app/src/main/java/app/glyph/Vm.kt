@@ -15,6 +15,8 @@ sealed interface St {
     data class Done(val g: Grain, val src: String) : St
 }
 
+enum class Filter { ALL, WORD, LINE, NONE, RETRY, ADD }
+
 class Vm(app: Application) : AndroidViewModel(app) {
     val tracks = MutableStateFlow<List<Track>>(emptyList())
     val status = MutableStateFlow<Map<Long, St>>(emptyMap())
@@ -22,6 +24,31 @@ class Vm(app: Application) : AndroidViewModel(app) {
     val served = MutableStateFlow(0)    // requests completed this session
     val folderUri = MutableStateFlow<Uri?>(null)
     val folderName = MutableStateFlow<String?>(null)
+    val filter = MutableStateFlow(Filter.ALL)
+
+    val counts: StateFlow<Map<Filter, Int>> = combine(tracks, status) { tr, st ->
+        var word = 0; var line = 0; var none = 0; var retry = 0; var add = 0
+        for (t in tr) {
+            when (val s = st[t.id] ?: St.Idle) {
+                is St.Done -> if (s.g == Grain.WORD) word++ else line++
+                St.Miss -> none++
+                St.Fail -> retry++
+                else -> add++
+            }
+        }
+        mapOf(
+            Filter.ALL to tr.size,
+            Filter.WORD to word,
+            Filter.LINE to line,
+            Filter.NONE to none,
+            Filter.RETRY to retry,
+            Filter.ADD to add
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val filteredTracks: StateFlow<List<Track>> = combine(tracks, status, filter) { tr, st, f ->
+        tr.filter { matchesFilter(it, f, st) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val prefs = app.getSharedPreferences("soul_sleep_prefs", Context.MODE_PRIVATE)
     private val gate = Mutex()          // FIFO: strictly one request at a time
@@ -42,6 +69,10 @@ class Vm(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun setFilter(f: Filter) {
+        filter.value = f
+    }
+
     fun requestPickFolder() {
         onPickFolder?.invoke()
     }
@@ -55,7 +86,17 @@ class Vm(app: Application) : AndroidViewModel(app) {
 
     fun load() {
         viewModelScope.launch(Dispatchers.IO) {
-            tracks.value = Library.scan(getApplication(), folderUri.value)
+            val list = Library.scan(getApplication(), folderUri.value)
+            tracks.value = list
+            // Check existing embedded lyrics in metadata
+            val existing = mutableMapOf<Long, St>()
+            for (t in list) {
+                val s = Library.checkExisting(t)
+                if (s != null) existing[t.id] = s
+            }
+            if (existing.isNotEmpty()) {
+                status.update { it + existing }
+            }
         }
     }
 
@@ -90,6 +131,27 @@ class Vm(app: Application) : AndroidViewModel(app) {
             requestPickFolder()
             return
         }
-        tracks.value.filter { status.value[it.id] !is St.Done }.forEach { add(it) }
+        val currentFilter = filter.value
+        val targets = tracks.value.filter { matchesFilter(it, currentFilter, status.value) }
+        val toProcess = if (currentFilter == Filter.ALL || currentFilter == Filter.ADD) {
+            targets.filter { status.value[it.id] !is St.Done }
+        } else {
+            targets.filter { status.value[it.id] !is St.Work }
+        }
+        toProcess.forEach { add(it) }
+    }
+
+    companion object {
+        fun matchesFilter(t: Track, f: Filter, st: Map<Long, St>): Boolean {
+            val s = st[t.id] ?: St.Idle
+            return when (f) {
+                Filter.ALL -> true
+                Filter.WORD -> s is St.Done && s.g == Grain.WORD
+                Filter.LINE -> s is St.Done && s.g == Grain.LINE
+                Filter.NONE -> s is St.Miss
+                Filter.RETRY -> s is St.Fail
+                Filter.ADD -> s is St.Idle || s is St.Work
+            }
+        }
     }
 }

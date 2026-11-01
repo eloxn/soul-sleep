@@ -79,6 +79,22 @@ object Library {
         AudioFileIO.read(File(path)).tag?.getFirst(FieldKey.ISRC)?.takeIf { it.isNotBlank() }
     }.getOrNull()
 
+    /** Checks if audio file already has embedded lyrics in its metadata. */
+    fun checkExisting(t: Track): St? = runCatching {
+        if (t.path.startsWith("content://")) return null
+        val file = File(t.path)
+        if (!file.exists() || !file.canRead()) return null
+        val af = AudioFileIO.read(file)
+        val lyr = af.tag?.getFirst(FieldKey.LYRICS)?.takeIf { it.isNotBlank() } ?: return null
+        if (Regex("<\\d{1,2}:\\d{2}").containsMatchIn(lyr)) {
+            St.Done(Grain.WORD, "embedded")
+        } else if (Regex("\\[\\d{1,2}:\\d{2}").containsMatchIn(lyr)) {
+            St.Done(Grain.LINE, "embedded")
+        } else {
+            null
+        }
+    }.getOrNull()
+
     /** Embeds strictly into the audio metadata tag (FieldKey.LYRICS). No .lrc file is created. */
     fun write(c: Context, t: Track, f: Found, folderUri: Uri?) {
         if (!t.path.startsWith("content://")) {

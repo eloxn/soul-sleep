@@ -5,6 +5,8 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,6 +20,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,10 +70,124 @@ fun Orb(busy: Boolean, rest: Int, modifier: Modifier = Modifier) {
 }
 
 @Composable
+fun FilterBar(
+    current: Filter,
+    counts: Map<Filter, Int>,
+    onSelect: (Filter) -> Unit
+) {
+    // Categories ordered as requested: none, word, retry, line (plus ALL & ADD)
+    val displayFilters = listOf(Filter.ALL, Filter.NONE, Filter.WORD, Filter.RETRY, Filter.LINE, Filter.ADD)
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+    ) {
+        items(displayFilters, key = { it.name }) { f ->
+            val selected = f == current
+            val count = counts[f] ?: 0
+            val shape = RoundedCornerShape(50)
+            val bg = if (selected) {
+                Brush.horizontalGradient(listOf(Color.White, Color(0xFF9E9E9E)))
+            } else {
+                Brush.horizontalGradient(listOf(Color(0xFF222222), Color(0xFF141414)))
+            }
+            val textCol = if (selected) Color.Black else Bone
+            val countCol = if (selected) Color(0xFF333333) else Ash
+
+            Row(
+                modifier = Modifier
+                    .clip(shape)
+                    .background(bg)
+                    .border(1.dp, if (selected) Color.White else Color.White.copy(0.12f), shape)
+                    .clickable { onSelect(f) }
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = f.name,
+                    color = textCol,
+                    fontSize = 11.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "$count",
+                    color = countCol,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SectionHeader(title: String, count: Int) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = title,
+            color = Bone,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 2.sp
+        )
+        Text(
+            text = "$count ${if (count == 1) "track" else "tracks"}",
+            color = Ash,
+            fontSize = 11.sp,
+            letterSpacing = 1.sp
+        )
+    }
+}
+
+@Composable
+fun TrackRow(
+    track: Track,
+    status: St,
+    tilt: Float,
+    onAction: () -> Unit
+) {
+    val density = LocalDensity.current.density
+    Row(
+        Modifier.fillMaxWidth().graphicsLayer { rotationX = tilt; cameraDistance = 12f * density; alpha = 1f - abs(tilt) / 60f }
+            .clip(RoundedCornerShape(22.dp)).background(Brush.horizontalGradient(listOf(Color(0xFF222222), Color(0xFF0A0A0A))))
+            .border(1.dp, Color.White.copy(.1f), RoundedCornerShape(22.dp)).padding(18.dp, 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(track.title, color = Bone, fontSize = 16.sp, maxLines = 1, fontWeight = FontWeight.Medium)
+            Text(track.artist, color = Ash, fontSize = 12.sp, maxLines = 1)
+        }
+        Pill(status, onAction)
+    }
+}
+
+@Composable
 fun Screen(vm: Vm) {
-    val tracks by vm.tracks.collectAsState(); val st by vm.status.collectAsState()
-    val rest by vm.rest.collectAsState(); val served by vm.served.collectAsState()
+    val allTracks by vm.tracks.collectAsState()
+    val tracks by vm.filteredTracks.collectAsState()
+    val st by vm.status.collectAsState()
+    val rest by vm.rest.collectAsState()
+    val served by vm.served.collectAsState()
+    val currentFilter by vm.filter.collectAsState()
+    val counts by vm.counts.collectAsState()
     val ls = rememberLazyListState()
+
+    val actionText = when (currentFilter) {
+        Filter.RETRY -> "RETRY ALL"
+        Filter.NONE -> "RETRY ALL"
+        Filter.WORD -> "SYNC WORD"
+        Filter.LINE -> "SYNC LINE"
+        else -> "ADD ALL"
+    }
+
     Column(Modifier.fillMaxSize().background(Void).statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(24.dp, 16.dp, 24.dp, 0.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -86,14 +203,29 @@ fun Screen(vm: Vm) {
                     modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { vm.requestPickFolder() }.padding(vertical = 2.dp)
                 )
             }
-            Text("ADD ALL", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp,
+            Text(actionText, color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp,
                 modifier = Modifier.clip(RoundedCornerShape(50)).background(Brush.horizontalGradient(listOf(Color.White, Color(0xFF8E8E8E))))
                     .clickable { vm.addAll() }.padding(16.dp, 10.dp))
         }
-        Orb(st.values.any { it is St.Work }, rest, Modifier.fillMaxWidth().height(250.dp))
-        Text(if (rest > 0) "cooling down — resuming in ${rest}s" else "${served % 50} / 50 before rest", color = Ash, fontSize = 12.sp,
-            letterSpacing = 2.sp, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        if (tracks.isEmpty()) {
+
+        Orb(st.values.any { it is St.Work }, rest, Modifier.fillMaxWidth().height(220.dp))
+
+        Text(
+            text = if (rest > 0) "cooling down — resuming in ${rest}s" else "${served % 50} / 50 before rest",
+            color = Ash,
+            fontSize = 12.sp,
+            letterSpacing = 2.sp,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+
+        FilterBar(
+            current = currentFilter,
+            counts = counts,
+            onSelect = { vm.setFilter(it) }
+        )
+
+        if (allTracks.isEmpty()) {
             val folder by vm.folderName.collectAsState()
             Box(Modifier.fillMaxWidth().weight(1f).padding(32.dp), contentAlignment = Alignment.Center) {
                 Text(
@@ -105,27 +237,61 @@ fun Screen(vm: Vm) {
                     modifier = Modifier.clickable { vm.requestPickFolder() }
                 )
             }
+        } else if (tracks.isEmpty()) {
+            Box(Modifier.fillMaxWidth().weight(1f).padding(32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "NO SONGS IN ${currentFilter.name}",
+                    color = Ash,
+                    fontSize = 12.sp,
+                    letterSpacing = 2.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
         } else {
-            LazyColumn(state = ls, contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 48.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                itemsIndexed(tracks, key = { _, t -> t.id }) { i, t ->
-                    val tilt by remember { derivedStateOf {   // rows lean away from the viewport centre like a rotating drum
-                        val li = ls.layoutInfo; val v = li.visibleItemsInfo.firstOrNull { x -> x.index == i }
-                        if (v == null) 0f else {
-                            val mid = (li.viewportStartOffset + li.viewportEndOffset) / 2f
-                            ((v.offset + v.size / 2f - mid) / (li.viewportEndOffset - li.viewportStartOffset)).coerceIn(-1f, 1f) * -26f
+            LazyColumn(state = ls, contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 48.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (currentFilter == Filter.ALL) {
+                    // Group songs in order: NONE, WORD, RETRY, LINE, ADD
+                    val categoryOrder = listOf(Filter.NONE, Filter.WORD, Filter.RETRY, Filter.LINE, Filter.ADD)
+                    var globalIndex = 0
+                    for (cat in categoryOrder) {
+                        val groupTracks = tracks.filter { Vm.matchesFilter(it, cat, st) }
+                        if (groupTracks.isNotEmpty()) {
+                            item(key = "header_${cat.name}") {
+                                SectionHeader(title = cat.name, count = groupTracks.size)
+                            }
+                            itemsIndexed(groupTracks, key = { _, t -> "${cat.name}_${t.id}" }) { _, t ->
+                                val itemIndex = globalIndex++
+                                val tilt by remember { derivedStateOf {
+                                    val li = ls.layoutInfo; val v = li.visibleItemsInfo.firstOrNull { x -> x.index == itemIndex }
+                                    if (v == null) 0f else {
+                                        val mid = (li.viewportStartOffset + li.viewportEndOffset) / 2f
+                                        ((v.offset + v.size / 2f - mid) / (li.viewportEndOffset - li.viewportStartOffset)).coerceIn(-1f, 1f) * -26f
+                                    }
+                                } }
+                                TrackRow(
+                                    track = t,
+                                    status = st[t.id] ?: St.Idle,
+                                    tilt = tilt,
+                                    onAction = { vm.add(t) }
+                                )
+                            }
                         }
-                    } }
-                    Row(
-                        Modifier.fillMaxWidth().graphicsLayer { rotationX = tilt; cameraDistance = 12f * density; alpha = 1f - abs(tilt) / 60f }
-                            .clip(RoundedCornerShape(22.dp)).background(Brush.horizontalGradient(listOf(Color(0xFF222222), Color(0xFF0A0A0A))))
-                            .border(1.dp, Color.White.copy(.1f), RoundedCornerShape(22.dp)).padding(18.dp, 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(t.title, color = Bone, fontSize = 16.sp, maxLines = 1, fontWeight = FontWeight.Medium)
-                            Text(t.artist, color = Ash, fontSize = 12.sp, maxLines = 1)
-                        }
-                        Pill(st[t.id] ?: St.Idle) { vm.add(t) }
+                    }
+                } else {
+                    itemsIndexed(tracks, key = { _, t -> t.id }) { i, t ->
+                        val tilt by remember { derivedStateOf {
+                            val li = ls.layoutInfo; val v = li.visibleItemsInfo.firstOrNull { x -> x.index == i }
+                            if (v == null) 0f else {
+                                val mid = (li.viewportStartOffset + li.viewportEndOffset) / 2f
+                                ((v.offset + v.size / 2f - mid) / (li.viewportEndOffset - li.viewportStartOffset)).coerceIn(-1f, 1f) * -26f
+                            }
+                        } }
+                        TrackRow(
+                            track = t,
+                            status = st[t.id] ?: St.Idle,
+                            tilt = tilt,
+                            onAction = { vm.add(t) }
+                        )
                     }
                 }
             }
