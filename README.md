@@ -5,7 +5,12 @@ An Android application that fetches synchronized lyrics from free, open APIs and
 ![Platform](https://img.shields.io/badge/Platform-Android-green)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.0-purple)
 ![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-blue)
-![License](https://img.shields.io/badge/License-MIT-orange)
+[![Release](https://img.shields.io/github/v/release/eloxn/soul-sleep?label=Download%20APK&color=brightgreen)](https://github.com/eloxn/soul-sleep/releases/latest)
+
+## 📥 Download
+
+Get the latest signed APK directly from the [Releases page](https://github.com/eloxn/soul-sleep/releases/latest):
+- **[Download SoulSleep-v1.0.0.apk](https://github.com/eloxn/soul-sleep/releases/download/v1.0.0/SoulSleep-v1.0.0.apk)** (Android 8.0+)
 
 ## Features
 
