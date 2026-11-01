@@ -178,6 +178,7 @@ fun Screen(vm: Vm) {
     val served by vm.served.collectAsState()
     val currentFilter by vm.filter.collectAsState()
     val counts by vm.counts.collectAsState()
+    val isScanning by vm.isScanning.collectAsState()
     val ls = rememberLazyListState()
 
     val actionText = when (currentFilter) {
@@ -203,9 +204,36 @@ fun Screen(vm: Vm) {
                     modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { vm.requestPickFolder() }.padding(vertical = 2.dp)
                 )
             }
-            Text(actionText, color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(Brush.horizontalGradient(listOf(Color.White, Color(0xFF8E8E8E))))
-                    .clickable { vm.addAll() }.padding(16.dp, 10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Brush.horizontalGradient(listOf(Color(0xFF282828), Color(0xFF141414))))
+                        .border(1.dp, Color.White.copy(0.18f), RoundedCornerShape(50))
+                        .clickable(enabled = !isScanning) { vm.rescan() }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isScanning) {
+                        CircularProgressIndicator(Modifier.size(13.dp), color = Color.White, strokeWidth = 2.dp)
+                    } else {
+                        Text("RESCAN", color = Bone, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    }
+                }
+
+                Text(
+                    text = actionText,
+                    color = Color.Black,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Brush.horizontalGradient(listOf(Color.White, Color(0xFF8E8E8E))))
+                        .clickable { vm.addAll() }
+                        .padding(16.dp, 10.dp)
+                )
+            }
         }
 
         Orb(st.values.any { it is St.Work }, rest, Modifier.fillMaxWidth().height(220.dp))
@@ -257,12 +285,15 @@ fun Screen(vm: Vm) {
             val folder by vm.folderName.collectAsState()
             Box(Modifier.fillMaxWidth().weight(1f).padding(32.dp), contentAlignment = Alignment.Center) {
                 Text(
-                    text = if (folder == null) "TAP HERE TO SELECT MUSIC FOLDER" else "NO SONGS FOUND IN $folder",
+                    text = if (folder == null) "TAP HERE TO SELECT MUSIC FOLDER" else "NO SONGS FOUND IN $folder\nTAP TO RESCAN",
                     color = Ash,
                     fontSize = 12.sp,
                     letterSpacing = 2.sp,
+                    lineHeight = 18.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier = Modifier.clickable { vm.requestPickFolder() }
+                    modifier = Modifier.clickable {
+                        if (folder == null) vm.requestPickFolder() else vm.rescan()
+                    }
                 )
             }
         } else if (tracks.isEmpty()) {

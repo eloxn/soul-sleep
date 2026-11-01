@@ -25,6 +25,7 @@ class Vm(app: Application) : AndroidViewModel(app) {
     val folderUri = MutableStateFlow<Uri?>(null)
     val folderName = MutableStateFlow<String?>(null)
     val filter = MutableStateFlow(Filter.ALL)
+    val isScanning = MutableStateFlow(false)
 
     val counts: StateFlow<Map<Filter, Int>> = combine(tracks, status) { tr, st ->
         var word = 0; var line = 0; var none = 0; var retry = 0; var add = 0
@@ -84,20 +85,28 @@ class Vm(app: Application) : AndroidViewModel(app) {
         load()
     }
 
-    fun load() {
+    fun rescan() {
+        if (isScanning.value) return
         viewModelScope.launch(Dispatchers.IO) {
-            val list = Library.scan(getApplication(), folderUri.value)
-            tracks.value = list
-            // Check existing embedded lyrics in metadata
-            val existing = mutableMapOf<Long, St>()
-            for (t in list) {
-                val s = Library.checkExisting(getApplication(), t)
-                if (s != null) existing[t.id] = s
-            }
-            if (existing.isNotEmpty()) {
-                status.update { it + existing }
+            isScanning.value = true
+            try {
+                val list = Library.scan(getApplication(), folderUri.value)
+                tracks.value = list
+                // Check existing embedded lyrics in metadata
+                val existing = mutableMapOf<Long, St>()
+                for (t in list) {
+                    val s = Library.checkExisting(getApplication(), t)
+                    if (s != null) existing[t.id] = s
+                }
+                status.value = existing
+            } finally {
+                isScanning.value = false
             }
         }
+    }
+
+    fun load() {
+        rescan()
     }
 
     private fun put(id: Long, s: St) = status.update { it + (id to s) }
