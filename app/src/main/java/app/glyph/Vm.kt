@@ -91,7 +91,7 @@ class Vm(app: Application) : AndroidViewModel(app) {
             // Check existing embedded lyrics in metadata
             val existing = mutableMapOf<Long, St>()
             for (t in list) {
-                val s = Library.checkExisting(t)
+                val s = Library.checkExisting(getApplication(), t)
                 if (s != null) existing[t.id] = s
             }
             if (existing.isNotEmpty()) {
@@ -102,8 +102,9 @@ class Vm(app: Application) : AndroidViewModel(app) {
 
     private fun put(id: Long, s: St) = status.update { it + (id to s) }
 
-    fun add(t: Track) {
+    fun add(t: Track, force: Boolean = false) {
         if (status.value[t.id] is St.Work) return
+        if (!force && status.value[t.id] is St.Done) return
         if (folderUri.value == null) {
             requestPickFolder()
             return
@@ -111,6 +112,17 @@ class Vm(app: Application) : AndroidViewModel(app) {
         put(t.id, St.Work)
         viewModelScope.launch {
             gate.withLock {
+                // If not forced, check if the audio file already has lyrics on storage
+                if (!force) {
+                    val already = withContext(Dispatchers.IO) {
+                        Library.checkExisting(getApplication(), t)
+                    }
+                    if (already != null) {
+                        put(t.id, already)
+                        return@withLock
+                    }
+                }
+
                 val r = withContext(Dispatchers.IO) {
                     runCatching {
                         Sources.find(t)?.also { Library.write(getApplication(), t, it, folderUri.value) }

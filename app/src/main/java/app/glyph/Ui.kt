@@ -210,14 +210,42 @@ fun Screen(vm: Vm) {
 
         Orb(st.values.any { it is St.Work }, rest, Modifier.fillMaxWidth().height(220.dp))
 
-        Text(
-            text = if (rest > 0) "cooling down — resuming in ${rest}s" else "${served % 50} / 50 before rest",
-            color = Ash,
-            fontSize = 12.sp,
-            letterSpacing = 2.sp,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
+        if (rest > 0) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "cooling down — resuming in ${rest}s",
+                    color = Bone,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 2.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "lrclib allow 50/songs per minute and it block the ip if the limit exceeds",
+                    color = Ash,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.sp,
+                    lineHeight = 15.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+        } else {
+            Text(
+                text = "${served % 50} / 50 before rest",
+                color = Ash,
+                fontSize = 12.sp,
+                letterSpacing = 2.sp,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
 
         FilterBar(
             current = currentFilter,

@@ -80,23 +80,50 @@ object Library {
     }.getOrNull()
 
     /** Checks if audio file already has embedded lyrics in its metadata. */
-    fun checkExisting(t: Track): St? = runCatching {
-        if (t.path.startsWith("content://")) return null
-        val file = File(t.path)
-        if (!file.exists() || !file.canRead()) return null
-        val af = AudioFileIO.read(file)
-        val lyr = af.tag?.getFirst(FieldKey.LYRICS)?.takeIf { it.isNotBlank() } ?: return null
+    fun checkExisting(c: Context, t: Track): St? = runCatching {
+        val lyr = getLyrics(c, t) ?: return null
+        if (lyr.isBlank()) return null
+        val isSoulSleep = lyr.contains("[by:Soul Sleep")
+        val src = if (isSoulSleep) "Soul Sleep" else "embedded"
         if (Regex("<\\d{1,2}:\\d{2}").containsMatchIn(lyr)) {
-            St.Done(Grain.WORD, "embedded")
+            St.Done(Grain.WORD, src)
         } else if (Regex("\\[\\d{1,2}:\\d{2}").containsMatchIn(lyr)) {
-            St.Done(Grain.LINE, "embedded")
+            St.Done(Grain.LINE, src)
+        } else if (isSoulSleep) {
+            St.Done(Grain.LINE, src)
         } else {
             null
         }
     }.getOrNull()
 
+    private fun getLyrics(c: Context, t: Track): String? = runCatching {
+        if (!t.path.startsWith("content://")) {
+            val file = File(t.path)
+            if (!file.exists() || !file.canRead()) return null
+            AudioFileIO.read(file).tag?.getFirst(FieldKey.LYRICS)
+        } else {
+            val uri = Uri.parse(t.path)
+            val ext = t.title.substringAfterLast(".", "mp3")
+            val temp = File(c.cacheDir, "read_check_${System.currentTimeMillis()}.$ext")
+            try {
+                c.contentResolver.openInputStream(uri)?.use { input ->
+                    temp.outputStream().use { output -> input.copyTo(output) }
+                } ?: return null
+                AudioFileIO.read(temp).tag?.getFirst(FieldKey.LYRICS)
+            } finally {
+                if (temp.exists()) temp.delete()
+            }
+        }
+    }.getOrNull()
+
     /** Embeds strictly into the audio metadata tag (FieldKey.LYRICS). No .lrc file is created. */
     fun write(c: Context, t: Track, f: Found, folderUri: Uri?) {
+        val textToSave = if (f.text.contains("[by:Soul Sleep")) {
+            f.text
+        } else {
+            "[by:Soul Sleep (${f.source})]\n${f.text}"
+        }
+
         if (!t.path.startsWith("content://")) {
             val file = File(t.path)
 
@@ -104,7 +131,7 @@ object Library {
             if (file.exists() && file.canWrite()) {
                 try {
                     val af = AudioFileIO.read(file)
-                    af.tagOrCreateAndSetDefault.apply { setField(FieldKey.LYRICS, f.text) }
+                    af.tagOrCreateAndSetDefault.apply { setField(FieldKey.LYRICS, textToSave) }
                     af.commit()
                     return
                 } catch (_: Exception) {
@@ -117,10 +144,10 @@ object Library {
             val docFile = findDocumentFile(c, treeUri, file)
                 ?: error("Could not locate ${file.name} in selected folder")
 
-            writeViaSafStream(c, docFile.uri, file.name, f.text)
+            writeViaSafStream(c, docFile.uri, file.name, textToSave)
         } else {
             val trackUri = Uri.parse(t.path)
-            writeViaSafStream(c, trackUri, "${t.title}.audio", f.text)
+            writeViaSafStream(c, trackUri, "${t.title}.audio", textToSave)
         }
     }
 
