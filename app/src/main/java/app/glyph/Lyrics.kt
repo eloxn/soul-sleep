@@ -12,6 +12,14 @@ data class Track(val id: Long, val path: String, val title: String, val artist: 
 enum class Grain { WORD, LINE }
 data class Found(val text: String, val grain: Grain, val source: String)
 
+private data class LrcRedCandidate(
+    val id: String,
+    val isrc: String,
+    val lyricsUrl: String,
+    val timingType: String,
+    val duration: Int
+)
+
 /** Priority: lrc.red word-sync -> LRCLIB line-sync. Plain (unsynced) text is never written. */
 object Sources {
     private val http = OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS)
@@ -26,7 +34,7 @@ object Sources {
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     fun find(t: Track): Found? {
-        return runCatching { lrcRed(t) }.getOrNull() ?: runCatching { lrclib(t) }.getOrNull()
+        return findWord(t) ?: findLine(t)
     }
 
     private fun cleanTitle(raw: String): String {
@@ -43,25 +51,82 @@ object Sources {
         return raw.split(Regex("""(?i)[,&/]|(\s+\b(?:feat|ft)\.?\b)""")).firstOrNull()?.trim() ?: raw
     }
 
-    private fun lrcRed(t: Track): Found? {
+    private fun queryLrcRed(query: String): List<LrcRedCandidate> {
+        val body = get(LRCRED_SEARCH + enc(query)) ?: return emptyList()
+        return runCatching {
+            val root = JSONObject(body)
+            val results = root.optJSONArray("results") ?: return emptyList()
+            (0 until results.length()).mapNotNull { i ->
+                val obj = results.optJSONObject(i) ?: return@mapNotNull null
+                val id = obj.optString("id", "")
+                val isrc = obj.optString("isrc", id)
+                val url = obj.optString("lyricsUrl", "")
+                val timing = obj.optString("timing_type", "")
+                val dur = obj.optInt("duration", 0)
+                if (id.isNotBlank() || isrc.isNotBlank() || url.isNotBlank()) {
+                    LrcRedCandidate(id = id, isrc = isrc, lyricsUrl = url, timingType = timing, duration = dur)
+                } else null
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /** Searches specifically for word-by-word synchronized lyrics from lrc.red (Apple Music TTML). */
+    fun findWord(t: Track): Found? {
         val cleanT = cleanTitle(t.title)
         val cleanA = cleanArtist(t.artist)
 
-        val isrc = Library.isrc(t.path)
-            ?: searchIsrc("${t.title} ${t.artist}")
-            ?: searchIsrc("$cleanT $cleanA")
-            ?: return null
+        // 1. Try embedded ISRC in file metadata if present
+        val fileIsrc = Library.isrc(t.path)
+        if (fileIsrc != null) {
+            val isrcClean = fileIsrc.replace("-", "").uppercase()
+            val ttml = get("https://lrc.red/s/$isrcClean.ttml")
+            if (ttml != null) {
+                val elrc = runCatching { Ttml.toElrc(ttml) }.getOrNull()
+                if (elrc != null) return Found(elrc, Grain.WORD, "lrc.red")
+            }
+        }
 
-        val ttml = get("https://lrc.red/s/${isrc.replace("-", "").uppercase()}.ttml") ?: return null
-        return runCatching { Ttml.toElrc(ttml) }.getOrNull()?.let { Found(it, Grain.WORD, "lrc.red") }
+        // 2. Query lrc.red with multiple query variations
+        val queries = listOfNotNull(
+            "$cleanT $cleanA",
+            "${t.title} ${t.artist}",
+            cleanT.takeIf { it.isNotBlank() && it != "$cleanT $cleanA" }
+        ).distinct()
+
+        for (q in queries) {
+            val candidates = queryLrcRed(q)
+            // Filter strictly for word-by-word synced items
+            val wordCandidates = candidates.filter { it.timingType.equals("word", ignoreCase = true) }
+            if (wordCandidates.isEmpty()) continue
+
+            // Prioritize closest duration match if track duration is known
+            val sorted = if (t.durSec > 0) {
+                wordCandidates.sortedBy { Math.abs(it.duration - t.durSec) }
+            } else {
+                wordCandidates
+            }
+
+            // Try the top candidate(s)
+            for (c in sorted.take(3)) {
+                val url = if (c.lyricsUrl.isNotBlank()) {
+                    c.lyricsUrl
+                } else {
+                    val code = (c.isrc.ifBlank { c.id }).replace("-", "").uppercase()
+                    "https://lrc.red/s/$code.ttml"
+                }
+                val ttml = get(url) ?: continue
+                val elrc = runCatching { Ttml.toElrc(ttml) }.getOrNull()
+                if (elrc != null) {
+                    return Found(elrc, Grain.WORD, "lrc.red")
+                }
+            }
+        }
+
+        return null
     }
 
-    private fun searchIsrc(query: String): String? {
-        val json = get(LRCRED_SEARCH + enc(query)) ?: return null
-        return Regex(""""isrc"\s*:\s*"([A-Za-z0-9-]{12,14})"""").find(json)?.groupValues?.get(1)
-    }
-
-    private fun lrclib(t: Track): Found? {
+    /** Searches for line-synced lyrics from LRCLIB. */
+    fun findLine(t: Track): Found? {
         val cleanT = cleanTitle(t.title)
         val cleanA = cleanArtist(t.artist)
 

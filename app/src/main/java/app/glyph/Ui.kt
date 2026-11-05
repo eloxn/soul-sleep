@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -180,12 +181,13 @@ fun Screen(vm: Vm) {
     val counts by vm.counts.collectAsState()
     val isScanning by vm.isScanning.collectAsState()
     val ls = rememberLazyListState()
+    var trackForWordDialog by remember { mutableStateOf<Track?>(null) }
 
     val actionText = when (currentFilter) {
         Filter.RETRY -> "RETRY ALL"
         Filter.NONE -> "RETRY ALL"
         Filter.WORD -> "SYNC WORD"
-        Filter.LINE -> "SYNC LINE"
+        Filter.LINE -> "CHANGE TO WORDS"
         else -> "ADD ALL"
     }
 
@@ -281,6 +283,37 @@ fun Screen(vm: Vm) {
             onSelect = { vm.setFilter(it) }
         )
 
+        if (currentFilter == Filter.LINE && tracks.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 10.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Brush.horizontalGradient(listOf(Color(0xFF222222), Color(0xFF141414))))
+                    .border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "UPGRADE LINE TO WORDS",
+                        color = Bone,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = "Tap 'CHANGE TO WORDS' or any LINE badge to search the API for word-synced lyrics.",
+                        color = Ash,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+        }
+
         if (allTracks.isEmpty()) {
             val folder by vm.folderName.collectAsState()
             Box(Modifier.fillMaxWidth().weight(1f).padding(32.dp), contentAlignment = Alignment.Center) {
@@ -331,7 +364,14 @@ fun Screen(vm: Vm) {
                                     track = t,
                                     status = st[t.id] ?: St.Idle,
                                     tilt = tilt,
-                                    onAction = { vm.add(t) }
+                                    onAction = {
+                                        val s = st[t.id]
+                                        if (s is St.Done && s.g == Grain.LINE) {
+                                            trackForWordDialog = t
+                                        } else {
+                                            vm.add(t)
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -349,8 +389,97 @@ fun Screen(vm: Vm) {
                             track = t,
                             status = st[t.id] ?: St.Idle,
                             tilt = tilt,
-                            onAction = { vm.add(t) }
+                            onAction = {
+                                val s = st[t.id]
+                                if (s is St.Done && s.g == Grain.LINE) {
+                                    trackForWordDialog = t
+                                } else {
+                                    vm.add(t)
+                                }
+                            }
                         )
+                    }
+                }
+            }
+        }
+
+        if (trackForWordDialog != null) {
+            val targetTrack = trackForWordDialog!!
+            Dialog(onDismissRequest = { trackForWordDialog = null }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Brush.verticalGradient(listOf(Color(0xFF222222), Color(0xFF111111))))
+                        .border(1.dp, Color.White.copy(0.18f), RoundedCornerShape(24.dp))
+                        .padding(24.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "CHANGE TO WORDS",
+                            color = Bone,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 2.sp
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = targetTrack.title,
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            maxLines = 2
+                        )
+                        Text(
+                            text = targetTrack.artist,
+                            color = Ash,
+                            fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            maxLines = 1
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            text = "Search API for word-by-word synced lyrics (Apple Music / lrc.red) to upgrade from line sync.\n\nIf word lyrics are found, they will be embedded into the audio file. If not found, your current line lyrics will remain safe.",
+                            color = Bone.copy(alpha = 0.8f),
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(Modifier.height(22.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color(0xFF282828))
+                                    .border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(50))
+                                    .clickable { trackForWordDialog = null }
+                                    .padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("CANCEL", color = Ash, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Brush.horizontalGradient(listOf(Color.White, Color(0xFF9E9E9E))))
+                                    .clickable {
+                                        val t = targetTrack
+                                        trackForWordDialog = null
+                                        vm.changeToWords(t)
+                                    }
+                                    .padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("SEARCH WORDS", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            }
+                        }
                     }
                 }
             }

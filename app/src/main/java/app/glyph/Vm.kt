@@ -150,19 +150,121 @@ class Vm(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Specifically searches for word-by-word lyrics in the API to upgrade a track from line to word sync. */
+    fun changeToWords(t: Track) {
+        if (status.value[t.id] is St.Work) return
+        if (folderUri.value == null) {
+            requestPickFolder()
+            return
+        }
+        val prev = status.value[t.id] ?: St.Idle
+        put(t.id, St.Work)
+        viewModelScope.launch {
+            gate.withLock {
+                val r = withContext(Dispatchers.IO) {
+                    runCatching {
+                        Sources.findWord(t)?.also { found ->
+                            Library.write(getApplication(), t, found, folderUri.value)
+                        }
+                    }
+                }
+                r.onFailure {
+                    android.util.Log.e("SoulSleep", "Failed to search word lyrics for ${t.title}: ${it.message}", it)
+                }
+                val found = r.getOrNull()
+                if (found != null) {
+                    put(t.id, St.Done(Grain.WORD, found.source))
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(getApplication(), "Found word lyrics for ${t.title}", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    // Restore previous line-sync status so existing lyrics are never lost
+                    put(t.id, prev)
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(getApplication(), "No word-by-word lyrics found for ${t.title}. Line lyrics kept.", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+                served.update { it + 1 }
+                if (served.value % 50 == 0) {
+                    for (s in 60 downTo 1) { rest.value = s; delay(1000) }
+                    rest.value = 0
+                }
+            }
+        }
+    }
+
+    /** Batch search for word-by-word lyrics for all songs currently having LINE sync. */
+    fun upgradeAllLineToWords() {
+        if (folderUri.value == null) {
+            requestPickFolder()
+            return
+        }
+        val lineTracks = tracks.value.filter {
+            val s = status.value[it.id]
+            s is St.Done && s.g == Grain.LINE
+        }
+        if (lineTracks.isEmpty()) {
+            android.widget.Toast.makeText(getApplication(), "No LINE tracks to upgrade", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        android.widget.Toast.makeText(getApplication(), "Searching word lyrics for ${lineTracks.size} track(s)...", android.widget.Toast.LENGTH_SHORT).show()
+
+        viewModelScope.launch {
+            var upgraded = 0
+            for (t in lineTracks) {
+                if (status.value[t.id] is St.Work) continue
+                val prev = status.value[t.id] ?: St.Idle
+                put(t.id, St.Work)
+                gate.withLock {
+                    val r = withContext(Dispatchers.IO) {
+                        runCatching {
+                            Sources.findWord(t)?.also { found ->
+                                Library.write(getApplication(), t, found, folderUri.value)
+                            }
+                        }
+                    }
+                    val found = r.getOrNull()
+                    if (found != null) {
+                        put(t.id, St.Done(Grain.WORD, found.source))
+                        upgraded++
+                    } else {
+                        put(t.id, prev)
+                    }
+                    served.update { it + 1 }
+                    if (served.value % 50 == 0) {
+                        for (s in 60 downTo 1) { rest.value = s; delay(1000) }
+                        rest.value = 0
+                    }
+                }
+            }
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    getApplication(),
+                    if (upgraded > 0) "Upgraded $upgraded track(s) to word lyrics!" else "No word lyrics found for LINE tracks",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
     fun addAll() {
         if (folderUri.value == null) {
             requestPickFolder()
             return
         }
         val currentFilter = filter.value
+        if (currentFilter == Filter.LINE) {
+            upgradeAllLineToWords()
+            return
+        }
         val targets = tracks.value.filter { matchesFilter(it, currentFilter, status.value) }
         val toProcess = if (currentFilter == Filter.ALL || currentFilter == Filter.ADD) {
             targets.filter { status.value[it.id] !is St.Done }
         } else {
             targets.filter { status.value[it.id] !is St.Work }
         }
-        toProcess.forEach { add(it) }
+        toProcess.forEach { add(it, force = (currentFilter == Filter.RETRY || currentFilter == Filter.NONE)) }
     }
 
     companion object {
